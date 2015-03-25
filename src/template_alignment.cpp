@@ -1,5 +1,6 @@
 #include <limits>
 #include <fstream>
+#include <iostream>
 #include <vector>
 #include <Eigen/Core>
 #include <pcl/point_types.h>
@@ -10,7 +11,9 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/features/fpfh.h>
+#include <pcl/features/pfh.h>
 #include <pcl/registration/ia_ransac.h>
+#include <pcl/console/parse.h>
 
 class FeatureCloud
 {
@@ -24,7 +27,8 @@ class FeatureCloud
         FeatureCloud () :
             search_method_xyz_ (new SearchMethod),
             normal_radius_ (0.02f),
-            feature_radius_ (0.02f)
+            feature_radius_ (0.02f),
+            feature_method_ (1) //-- using FPFH as the default method
     {}
 
         ~FeatureCloud () {}
@@ -113,6 +117,7 @@ class FeatureCloud
         // Parameters
         float normal_radius_;
         float feature_radius_;
+        int feature_method_;
 };
 
 class TemplateAlignment
@@ -226,7 +231,8 @@ main (int argc, char **argv)
 {
     if (argc < 3)
     {
-        printf ("No target PCD file given!\n");
+        //printf ("No target PCD file given!\n");
+        std::cout << "usage: ./template_alignment ../data/object_templates.txt ../data/person.pcd\n";
         return (-1);
     }
 
@@ -284,7 +290,7 @@ main (int argc, char **argv)
 
     // Find the best template alignment
     TemplateAlignment::Result best_alignment;
-    int best_index = template_align.findBestAlignment (best_alignment); //core dump here... (thk 150319)
+    int best_index = template_align.findBestAlignment (best_alignment);
     const FeatureCloud &best_template = object_templates[best_index];
 
     // Print the alignment fitness score (values less than 0.00002 are good)
