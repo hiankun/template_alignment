@@ -15,6 +15,8 @@
 #include <pcl/registration/ia_ransac.h>
 #include <pcl/console/parse.h>
 
+#include <pcl/keypoints/sift_keypoint.h>
+
 class FeatureCloud
 {
     public:
@@ -253,18 +255,40 @@ main (int argc, char **argv)
     input_stream.close ();
 
     // Load the target cloud PCD file
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+    //pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
     pcl::io::loadPCDFile (argv[2], *cloud);
 
     // Preprocess the cloud by...
     // ...removing distant points
     const float depth_limit = 1.0;
-    pcl::PassThrough<pcl::PointXYZ> pass;
+    //pcl::PassThrough<pcl::PointXYZ> pass;
+    pcl::PassThrough<pcl::PointXYZRGB> pass;
     pass.setInputCloud (cloud);
     pass.setFilterFieldName ("z");
     pass.setFilterLimits (0, depth_limit);
     pass.filter (*cloud);
 
+    //-- keypoints
+    // Parameters for sift computation
+    const float min_scale = 0.1f;
+    const int n_octaves = 6;
+    const int n_scales_per_octave = 10;
+    const float min_contrast = 0.5f;
+    // Estimate the sift interest points using Intensity values from RGB values
+    pcl::SIFTKeypoint<pcl::PointXYZRGB, pcl::PointWithScale> sift;
+    pcl::PointCloud<pcl::PointWithScale> result;
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB> ());
+    sift.setSearchMethod(tree);
+    sift.setScales(min_scale, n_octaves, n_scales_per_octave);
+    sift.setMinimumContrast(min_contrast);
+    sift.setInputCloud(cloud);
+    sift.compute(result);
+    // Copying the pointwithscale to pointxyz so as visualize the cloud
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
+    copyPointCloud(result, *cloud_kp);
+
+#if 0
     // ... and downsampling the point cloud
     const float voxel_grid_size = 0.005f;
     pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
@@ -274,10 +298,12 @@ main (int argc, char **argv)
     pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZ>);
     vox_grid.filter (*tempCloud);
     cloud = tempCloud;
+#endif
 
     // Assign to the target FeatureCloud
     FeatureCloud target_cloud;
-    target_cloud.setInputCloud (cloud);
+    //target_cloud.setInputCloud (cloud);
+    target_cloud.setInputCloud (cloud_kp);
 
     // Set the TemplateAlignment inputs
     TemplateAlignment template_align;
