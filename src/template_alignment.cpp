@@ -285,6 +285,7 @@ main (int argc, char **argv)
         USE_KP = false;
 
     FeatureCloud target_cloud;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr kp_view (new pcl::PointCloud<pcl::PointXYZ>);
     if (USE_KP) {
         //-- keypoints
         // Parameters for sift computation
@@ -302,13 +303,15 @@ main (int argc, char **argv)
         sift.compute(result);
         // Copying the pointwithscale to pointxyz so as visualize the cloud
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
-        copyPointCloud(result, *cloud_kp);
+        pcl::copyPointCloud(result, *cloud_kp);
         // Saving the resultant cloud
         std::cout << "Resulting sift points are of size: " << cloud_kp->points.size () <<std::endl;
         pcl::io::savePCDFileASCII("sift_points.pcd", *cloud_kp);
         //
         // Assign to the target FeatureCloud
         target_cloud.setInputCloud (cloud_kp);
+        //-- copy for viewer
+        pcl::copyPointCloud(*cloud_kp, *kp_view);
     } else {
         // ... just downsample the point cloud
         //pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
@@ -319,13 +322,17 @@ main (int argc, char **argv)
         //pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZ>);
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZRGB>);
         vox_grid.filter (*tempCloud);
-        cloud = tempCloud;
+        std::cout << "Downsampled points are of size: " << tempCloud->points.size () <<std::endl;
+        //cloud = tempCloud;
         //-- workaround, to convert the cloud from XYZRGB to XYZ
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::copyPointCloud(*cloud, *cloud_xyz);
+        //pcl::copyPointCloud(*cloud, *cloud_xyz);
+        pcl::copyPointCloud(*tempCloud, *cloud_xyz);
 
         // Assign to the target FeatureCloud
         target_cloud.setInputCloud (cloud_xyz);
+        //-- copy for viewer
+        pcl::copyPointCloud(*cloud_xyz, *kp_view);
     }
 
 
@@ -363,11 +370,16 @@ main (int argc, char **argv)
 
 
     //-- visualization
+    //-- the scene
     pcl::visualization::PCLVisualizer viewer(argv[1]);
     viewer.addPointCloud(cloud, "original");
-    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> colorHandler(transformed_cloud, 255, 0, 0);
-    viewer.addPointCloud(transformed_cloud, colorHandler, "transformed");
-    //viewer.addPointCloud(transformed_cloud, "transformed");
+    //-- the keypoints (or downsampled points)
+    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> kp_colorHandler(kp_view, 255, 255, 0);
+    viewer.addPointCloud(kp_view,kp_colorHandler, "kp");
+    viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "kp");
+    //-- the transformed template
+    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> tr_colorHandler(transformed_cloud, 255, 0, 0);
+    viewer.addPointCloud(transformed_cloud, tr_colorHandler, "transformed");
 
     while (!viewer.wasStopped()) {
         viewer.spinOnce();
