@@ -18,6 +18,7 @@
 #include <pcl/visualization/pcl_visualizer.h>
 
 #include <pcl/keypoints/sift_keypoint.h>
+#include <pcl/keypoints/iss_3d.h>
 
 //#define USE_KP 1
 
@@ -230,6 +231,37 @@ class TemplateAlignment
         int nr_iterations_;
 };
 
+// This function by Tommaso Cavallari and Federico Tombari, taken from the tutorial
+// http://pointclouds.org/documentation/tutorials/correspondence_grouping.php
+double computeCloudResolution(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& cloud)
+{
+    double resolution = 0.0;
+    int numberOfPoints = 0;
+    int nres;
+    std::vector<int> indices(2);
+    std::vector<float> squaredDistances(2);
+    pcl::search::KdTree<pcl::PointXYZ> tree;
+    tree.setInputCloud(cloud);
+
+    for (size_t i = 0; i < cloud->size(); ++i)
+    {
+        if (! pcl_isfinite((*cloud)[i].x))
+            continue;
+
+        // Considering the second neighbor since the first is the point itself.
+        nres = tree.nearestKSearch(i, 2, indices, squaredDistances);
+        if (nres == 2)
+        {
+            resolution += sqrt(squaredDistances[1]);
+            ++numberOfPoints;
+        }
+    }
+    if (numberOfPoints != 0)
+        resolution /= numberOfPoints;
+
+    return resolution;
+}
+
 // Align a collection of object templates to a sample point cloud
     int
 main (int argc, char **argv)
@@ -274,65 +306,119 @@ main (int argc, char **argv)
     pass.filter (*cloud);
 
 
-    bool USE_KP = false;
-
-    float min_scale = 0.01f;
-    if (pcl::console::parse(argc, argv, "-s", min_scale) > 0)
-        USE_KP = true;
+    int method = 0;
 
     float voxel_grid_size = 0.005f;
     if (pcl::console::parse(argc, argv, "-v", voxel_grid_size) > 0)
-        USE_KP = false;
+        method = 0;
+
+    float min_scale = 0.01f;
+    if (pcl::console::parse(argc, argv, "-s", min_scale) > 0)
+        method = 1;
+
+    double cloud_resolution (0.0058329);
+    if (pcl::console::parse(argc, argv, "-iss", cloud_resolution) > 0)
+        method = 2;
 
     FeatureCloud target_cloud;
     pcl::PointCloud<pcl::PointXYZ>::Ptr kp_view (new pcl::PointCloud<pcl::PointXYZ>);
-    if (USE_KP) {
-        //-- keypoints
-        // Parameters for sift computation
-        const int n_octaves = 6;
-        const int n_scales_per_octave = 10;
-        const float min_contrast = 0.5f;
-        // Estimate the sift interest points using Intensity values from RGB values
-        pcl::SIFTKeypoint<pcl::PointXYZRGB, pcl::PointWithScale> sift;
-        pcl::PointCloud<pcl::PointWithScale> result;
-        pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB> ());
-        sift.setSearchMethod(tree);
-        sift.setScales(min_scale, n_octaves, n_scales_per_octave);
-        sift.setMinimumContrast(min_contrast);
-        sift.setInputCloud(cloud);
-        sift.compute(result);
-        // Copying the pointwithscale to pointxyz so as visualize the cloud
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::copyPointCloud(result, *cloud_kp);
-        // Saving the resultant cloud
-        std::cout << "Resulting sift points are of size: " << cloud_kp->points.size () <<std::endl;
-        pcl::io::savePCDFileASCII("sift_points.pcd", *cloud_kp);
-        //
-        // Assign to the target FeatureCloud
-        target_cloud.setInputCloud (cloud_kp);
-        //-- copy for viewer
-        pcl::copyPointCloud(*cloud_kp, *kp_view);
-    } else {
-        // ... just downsample the point cloud
-        //pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
-        pcl::VoxelGrid<pcl::PointXYZRGB> vox_grid;
-        vox_grid.setInputCloud (cloud);
-        vox_grid.setLeafSize (voxel_grid_size, voxel_grid_size, voxel_grid_size);
-        //vox_grid.filter (*cloud); // Please see this http://www.pcl-developers.org/Possible-problem-in-new-VoxelGrid-implementation-from-PCL-1-5-0-td5490361.html
-        //pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        vox_grid.filter (*tempCloud);
-        std::cout << "Downsampled points are of size: " << tempCloud->points.size () <<std::endl;
-        //cloud = tempCloud;
-        //-- workaround, to convert the cloud from XYZRGB to XYZ
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZ>);
-        //pcl::copyPointCloud(*cloud, *cloud_xyz);
-        pcl::copyPointCloud(*tempCloud, *cloud_xyz);
+    switch (method)
+    {
+        case 0:
+            {
+                // ... just downsample the point cloud
+                //pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
+                pcl::VoxelGrid<pcl::PointXYZRGB> vox_grid;
+                vox_grid.setInputCloud (cloud);
+                vox_grid.setLeafSize (voxel_grid_size, voxel_grid_size, voxel_grid_size);
+                //vox_grid.filter (*cloud); // Please see this http://www.pcl-developers.org/Possible-problem-in-new-VoxelGrid-implementation-from-PCL-1-5-0-td5490361.html
+                //pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+                vox_grid.filter (*tempCloud);
+                std::cout << "Downsampled points are of size: " << tempCloud->points.size () <<std::endl;
+                //cloud = tempCloud;
+                //-- workaround, to convert the cloud from XYZRGB to XYZ
+                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZ>);
+                //pcl::copyPointCloud(*cloud, *cloud_xyz);
+                pcl::copyPointCloud(*tempCloud, *cloud_xyz);
 
-        // Assign to the target FeatureCloud
-        target_cloud.setInputCloud (cloud_xyz);
-        //-- copy for viewer
-        pcl::copyPointCloud(*cloud_xyz, *kp_view);
+                // Assign to the target FeatureCloud
+                target_cloud.setInputCloud (cloud_xyz);
+                //-- copy for viewer
+                pcl::copyPointCloud(*cloud_xyz, *kp_view);
+                break;
+            }
+        case 1:
+            {
+                //-- keypoints
+                // Parameters for sift computation
+                const int n_octaves = 6;
+                const int n_scales_per_octave = 10;
+                const float min_contrast = 0.5f;
+                // Estimate the sift interest points using Intensity values from RGB values
+                pcl::SIFTKeypoint<pcl::PointXYZRGB, pcl::PointWithScale> sift;
+                pcl::PointCloud<pcl::PointWithScale> result;
+                pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB> ());
+                sift.setSearchMethod(tree);
+                sift.setScales(min_scale, n_octaves, n_scales_per_octave);
+                sift.setMinimumContrast(min_contrast);
+                sift.setInputCloud(cloud);
+                sift.compute(result);
+                // Copying the pointwithscale to pointxyz so as visualize the cloud
+                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::copyPointCloud(result, *cloud_kp);
+                // Saving the resultant cloud
+                std::cout << "Resulting Sift 3D points are of size: " << cloud_kp->points.size () <<std::endl;
+                pcl::io::savePCDFileASCII("sift_3d_kp.pcd", *cloud_kp);
+                //
+                // Assign to the target FeatureCloud
+                target_cloud.setInputCloud (cloud_kp);
+                //-- copy for viewer
+                pcl::copyPointCloud(*cloud_kp, *kp_view);
+                break;
+            }
+        case 2:
+            {
+                //-- workaround, to convert the cloud from XYZRGB to XYZ
+                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::copyPointCloud(*cloud, *cloud_xyz);
+
+                // Objects for storing the point cloud and the keypoints.
+                //pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints(new pcl::PointCloud<pcl::PointXYZ>);
+                // ISS keypoint detector object.
+                pcl::ISSKeypoint3D<pcl::PointXYZ, pcl::PointXYZ> detector;
+                detector.setInputCloud(cloud_xyz);
+                pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZ>);
+                detector.setSearchMethod(kdtree);
+                //double cloud_resolution = computeCloudResolution(cloud);
+                cloud_resolution = computeCloudResolution(cloud_xyz);
+                std::cout << "cloud_resolution: " << cloud_resolution << std::endl;
+                // Set the radius of the spherical neighborhood used to compute the scatter matrix.
+                detector.setSalientRadius(6 * cloud_resolution);
+                // Set the radius for the application of the non maxima supression algorithm.
+                detector.setNonMaxRadius(4 * cloud_resolution);
+                // Set the minimum number of neighbors that has to be found while applying the non maxima suppression algorithm.
+                detector.setMinNeighbors(5);
+                // Set the upper bound on the ratio between the second and the first eigenvalue.
+                detector.setThreshold21(0.975);
+                // Set the upper bound on the ratio between the third and the second eigenvalue.
+                detector.setThreshold32(0.975);
+                // Set the number of prpcessing threads to use. 0 sets it to automatic.
+                detector.setNumberOfThreads(0);
+
+                detector.compute(*keypoints);
+                // Copying the pointwithscale to pointxyz so as visualize the cloud
+                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::copyPointCloud(*keypoints, *cloud_kp);
+                std::cout << "Resulting ISS 3D points are of size: " << cloud_kp->points.size () <<std::endl;
+                pcl::io::savePCDFileASCII("iss_3d_kp.pcd", *cloud_kp);
+                //
+                // Assign to the target FeatureCloud
+                target_cloud.setInputCloud (cloud_kp);
+                //-- copy for viewer
+                pcl::copyPointCloud(*cloud_kp, *kp_view);
+            }
     }
 
 
