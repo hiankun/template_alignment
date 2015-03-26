@@ -19,7 +19,7 @@
 
 #include <pcl/keypoints/sift_keypoint.h>
 
-#define USE_KP 0
+//#define USE_KP 1
 
 class FeatureCloud
 {
@@ -237,7 +237,7 @@ main (int argc, char **argv)
     if (argc < 3)
     {
         //printf ("No target PCD file given!\n");
-        std::cout << "usage: ./template_alignment ../data/object_templates.txt ../data/person.pcd\n";
+        std::cout << "usage: ./template_alignment ../data/object_templates.txt ../data/person.pcd [-s <sift3D min_scale> | -v <voxel_grid_size>]\n";
         return (-1);
     }
 
@@ -273,10 +273,21 @@ main (int argc, char **argv)
     pass.setFilterLimits (0, depth_limit);
     pass.filter (*cloud);
 
-#if 0
+
+    bool USE_KP = false;
+
+    float min_scale = 0.01f;
+    if (pcl::console::parse(argc, argv, "-s", min_scale) > 0)
+        USE_KP = true;
+
+    float voxel_grid_size = 0.005f;
+    if (pcl::console::parse(argc, argv, "-v", voxel_grid_size) > 0)
+        USE_KP = false;
+
+    FeatureCloud target_cloud;
+    if (USE_KP) {
         //-- keypoints
         // Parameters for sift computation
-        const float min_scale = 0.1f;
         const int n_octaves = 6;
         const int n_scales_per_octave = 10;
         const float min_contrast = 0.5f;
@@ -297,11 +308,9 @@ main (int argc, char **argv)
         pcl::io::savePCDFileASCII("sift_points.pcd", *cloud_kp);
         //
         // Assign to the target FeatureCloud
-        FeatureCloud target_cloud;
         target_cloud.setInputCloud (cloud_kp);
-#else
-        // ... and downsampling the point cloud
-        const float voxel_grid_size = 0.005f;
+    } else {
+        // ... just downsample the point cloud
         //pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
         pcl::VoxelGrid<pcl::PointXYZRGB> vox_grid;
         vox_grid.setInputCloud (cloud);
@@ -316,9 +325,8 @@ main (int argc, char **argv)
         pcl::copyPointCloud(*cloud, *cloud_xyz);
 
         // Assign to the target FeatureCloud
-        FeatureCloud target_cloud;
         target_cloud.setInputCloud (cloud_xyz);
-#endif
+    }
 
 
     // Set the TemplateAlignment inputs
