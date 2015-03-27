@@ -19,17 +19,20 @@
 
 #include <pcl/keypoints/sift_keypoint.h>
 #include <pcl/keypoints/iss_3d.h>
+#include <pcl/keypoints/susan.h>
+#include <pcl/keypoints/uniform_sampling.h>
 
-//#define USE_KP 1
+enum KP_METHOD {VOX, SIFT, ISS, SUSAN, UNI};
+typedef pcl::PointXYZRGBA PointType;
 
 class FeatureCloud
 {
     public:
         // A bit of shorthand
-        typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
+        typedef pcl::PointCloud<PointType> PointCloud;
         typedef pcl::PointCloud<pcl::Normal> SurfaceNormals;
         typedef pcl::PointCloud<pcl::FPFHSignature33> LocalFeatures;
-        typedef pcl::search::KdTree<pcl::PointXYZ> SearchMethod;
+        typedef pcl::search::KdTree<PointType> SearchMethod;
 
         FeatureCloud () :
             search_method_xyz_ (new SearchMethod),
@@ -92,7 +95,7 @@ class FeatureCloud
             {
                 normals_ = SurfaceNormals::Ptr (new SurfaceNormals);
 
-                pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> norm_est;
+                pcl::NormalEstimation<PointType, pcl::Normal> norm_est;
                 norm_est.setInputCloud (xyz_);
                 norm_est.setSearchMethod (search_method_xyz_);
                 norm_est.setRadiusSearch (normal_radius_);
@@ -105,7 +108,7 @@ class FeatureCloud
             {
                 features_ = LocalFeatures::Ptr (new LocalFeatures);
 
-                pcl::FPFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::FPFHSignature33> fpfh_est;
+                pcl::FPFHEstimation<PointType, pcl::Normal, pcl::FPFHSignature33> fpfh_est;
                 fpfh_est.setInputCloud (xyz_);
                 fpfh_est.setInputNormals (normals_);
                 fpfh_est.setSearchMethod (search_method_xyz_);
@@ -175,7 +178,7 @@ class TemplateAlignment
                 sac_ia_.setInputSource (template_cloud.getPointCloud ());
                 sac_ia_.setSourceFeatures (template_cloud.getLocalFeatures ());
 
-                pcl::PointCloud<pcl::PointXYZ> registration_output;
+                pcl::PointCloud<PointType> registration_output;
                 sac_ia_.align (registration_output);
 
                 result.fitness_score = (float) sac_ia_.getFitnessScore (max_correspondence_distance_);
@@ -225,7 +228,7 @@ class TemplateAlignment
         FeatureCloud target_;
 
         // The Sample Consensus Initial Alignment (SAC-IA) registration routine and its parameters
-        pcl::SampleConsensusInitialAlignment<pcl::PointXYZ, pcl::PointXYZ, pcl::FPFHSignature33> sac_ia_;
+        pcl::SampleConsensusInitialAlignment<PointType, PointType, pcl::FPFHSignature33> sac_ia_;
         float min_sample_distance_;
         float max_correspondence_distance_;
         int nr_iterations_;
@@ -233,14 +236,14 @@ class TemplateAlignment
 
 // This function by Tommaso Cavallari and Federico Tombari, taken from the tutorial
 // http://pointclouds.org/documentation/tutorials/correspondence_grouping.php
-double computeCloudResolution(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& cloud)
+double computeCloudResolution(const pcl::PointCloud<PointType>::ConstPtr& cloud)
 {
     double resolution = 0.0;
     int numberOfPoints = 0;
     int nres;
     std::vector<int> indices(2);
     std::vector<float> squaredDistances(2);
-    pcl::search::KdTree<pcl::PointXYZ> tree;
+    pcl::search::KdTree<PointType> tree;
     tree.setInputCloud(cloud);
 
     for (size_t i = 0; i < cloud->size(); ++i)
@@ -291,64 +294,72 @@ main (int argc, char **argv)
     input_stream.close ();
 
     // Load the target cloud PCD file
-    //pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+    //pcl::PointCloud<PointType>::Ptr cloud (new pcl::PointCloud<PointType>);
+    pcl::PointCloud<PointType>::Ptr cloud (new pcl::PointCloud<PointType>);
     pcl::io::loadPCDFile (argv[2], *cloud);
 
+#if 1 //-- the filter cut out part of the cloud
     // Preprocess the cloud by...
     // ...removing distant points
     const float depth_limit = 1.0;
-    //pcl::PassThrough<pcl::PointXYZ> pass;
-    pcl::PassThrough<pcl::PointXYZRGB> pass;
+    //pcl::PassThrough<PointType> pass;
+    pcl::PassThrough<PointType> pass;
     pass.setInputCloud (cloud);
     pass.setFilterFieldName ("z");
     pass.setFilterLimits (0, depth_limit);
     pass.filter (*cloud);
+#endif
 
-
-    int method = 0;
+    KP_METHOD kp_method;
+    //int method = 0;
 
     float voxel_grid_size = 0.005f;
-    if (pcl::console::parse(argc, argv, "-v", voxel_grid_size) > 0)
-        method = 0;
+    if (pcl::console::parse(argc, argv, "-vox", voxel_grid_size) > 0)
+        kp_method = VOX;
 
     float min_scale = 0.01f;
-    if (pcl::console::parse(argc, argv, "-s", min_scale) > 0)
-        method = 1;
+    if (pcl::console::parse(argc, argv, "-sift", min_scale) > 0)
+        kp_method = SIFT;
 
     double cloud_resolution (0.0058329);
     if (pcl::console::parse(argc, argv, "-iss", cloud_resolution) > 0)
-        method = 2;
+        kp_method = ISS;
+
+    float susan_radius (0.01f);
+    if (pcl::console::parse(argc, argv, "-susan", susan_radius) > 0)
+        kp_method = SUSAN;
+
+    float uni_radius (0.01f);
+    if (pcl::console::parse(argc, argv, "-uni", uni_radius) > 0)
+        kp_method = UNI;
 
     FeatureCloud target_cloud;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr kp_view (new pcl::PointCloud<pcl::PointXYZ>);
-    switch (method)
+    pcl::PointCloud<PointType>::Ptr kp_view (new pcl::PointCloud<PointType>);
+    switch (kp_method)
     {
-        case 0:
+        case VOX:
             {
                 // ... just downsample the point cloud
-                //pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
-                pcl::VoxelGrid<pcl::PointXYZRGB> vox_grid;
+                pcl::VoxelGrid<PointType> vox_grid;
                 vox_grid.setInputCloud (cloud);
                 vox_grid.setLeafSize (voxel_grid_size, voxel_grid_size, voxel_grid_size);
                 //vox_grid.filter (*cloud); // Please see this http://www.pcl-developers.org/Possible-problem-in-new-VoxelGrid-implementation-from-PCL-1-5-0-td5490361.html
-                //pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZ>);
-                pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+                //pcl::PointCloud<PointType>::Ptr tempCloud (new pcl::PointCloud<PointType>);
+                pcl::PointCloud<PointType>::Ptr tempCloud (new pcl::PointCloud<PointType>);
                 vox_grid.filter (*tempCloud);
                 std::cout << "Downsampled points are of size: " << tempCloud->points.size () <<std::endl;
-                //cloud = tempCloud;
+
                 //-- workaround, to convert the cloud from XYZRGB to XYZ
-                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZ>);
-                //pcl::copyPointCloud(*cloud, *cloud_xyz);
-                pcl::copyPointCloud(*tempCloud, *cloud_xyz);
+                //pcl::PointCloud<PointType>::Ptr cloud_xyz (new pcl::PointCloud<PointType>);
+                //pcl::copyPointCloud(*tempCloud, *cloud_xyz);
 
                 // Assign to the target FeatureCloud
-                target_cloud.setInputCloud (cloud_xyz);
+                target_cloud.setInputCloud (tempCloud);
                 //-- copy for viewer
-                pcl::copyPointCloud(*cloud_xyz, *kp_view);
+                pcl::copyPointCloud(*tempCloud, *kp_view);
                 break;
             }
-        case 1:
+        case SIFT:
             {
                 //-- keypoints
                 // Parameters for sift computation
@@ -356,20 +367,20 @@ main (int argc, char **argv)
                 const int n_scales_per_octave = 10;
                 const float min_contrast = 0.5f;
                 // Estimate the sift interest points using Intensity values from RGB values
-                pcl::SIFTKeypoint<pcl::PointXYZRGB, pcl::PointWithScale> sift;
+                pcl::SIFTKeypoint<PointType, pcl::PointWithScale> sift;
                 pcl::PointCloud<pcl::PointWithScale> result;
-                pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB> ());
+                pcl::search::KdTree<PointType>::Ptr tree(new pcl::search::KdTree<PointType> ());
                 sift.setSearchMethod(tree);
                 sift.setScales(min_scale, n_octaves, n_scales_per_octave);
                 sift.setMinimumContrast(min_contrast);
                 sift.setInputCloud(cloud);
                 sift.compute(result);
                 // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(result, *cloud_kp);
                 // Saving the resultant cloud
                 std::cout << "Resulting Sift 3D points are of size: " << cloud_kp->points.size () <<std::endl;
-                pcl::io::savePCDFileASCII("sift_3d_kp.pcd", *cloud_kp);
+                //pcl::io::savePCDFileASCII("sift_3d_kp.pcd", *cloud_kp);
                 //
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
@@ -377,47 +388,97 @@ main (int argc, char **argv)
                 pcl::copyPointCloud(*cloud_kp, *kp_view);
                 break;
             }
-        case 2:
+        case ISS:
             {
-                //-- workaround, to convert the cloud from XYZRGB to XYZ
-                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZ>);
-                pcl::copyPointCloud(*cloud, *cloud_xyz);
-
-                // Objects for storing the point cloud and the keypoints.
-                //pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-                pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints(new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::PointCloud<PointType>::Ptr keypoints(new pcl::PointCloud<PointType>);
                 // ISS keypoint detector object.
-                pcl::ISSKeypoint3D<pcl::PointXYZ, pcl::PointXYZ> detector;
-                detector.setInputCloud(cloud_xyz);
-                pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZ>);
-                detector.setSearchMethod(kdtree);
-                //double cloud_resolution = computeCloudResolution(cloud);
-                cloud_resolution = computeCloudResolution(cloud_xyz);
-                std::cout << "cloud_resolution: " << cloud_resolution << std::endl;
-                // Set the radius of the spherical neighborhood used to compute the scatter matrix.
-                detector.setSalientRadius(6 * cloud_resolution);
-                // Set the radius for the application of the non maxima supression algorithm.
-                detector.setNonMaxRadius(4 * cloud_resolution);
-                // Set the minimum number of neighbors that has to be found while applying the non maxima suppression algorithm.
-                detector.setMinNeighbors(5);
-                // Set the upper bound on the ratio between the second and the first eigenvalue.
-                detector.setThreshold21(0.975);
-                // Set the upper bound on the ratio between the third and the second eigenvalue.
-                detector.setThreshold32(0.975);
-                // Set the number of prpcessing threads to use. 0 sets it to automatic.
-                detector.setNumberOfThreads(0);
+                pcl::ISSKeypoint3D<PointType, PointType> iss;
+                //iss.setInputCloud(cloud_xyz);
+                iss.setInputCloud(cloud);
+                //pcl::search::KdTree<PointType>::Ptr kdtree(new pcl::search::KdTree<PointType>);
+                //iss.setSearchMethod(kdtree);
 
-                detector.compute(*keypoints);
+                if (cloud_resolution <= 0.0)
+                    cloud_resolution = computeCloudResolution(cloud);
+                std::cout << "cloud_resolution: " << cloud_resolution << std::endl;
+
+                // Set the radius of the spherical neighborhood used to compute the scatter matrix.
+                iss.setSalientRadius(6 * cloud_resolution);
+                // Set the radius for the application of the non maxima supression algorithm.
+                iss.setNonMaxRadius(4 * cloud_resolution);
+                // Set the minimum number of neighbors that has to be found while applying the non maxima suppression algorithm.
+                iss.setMinNeighbors(5);
+                // Set the upper bound on the ratio between the second and the first eigenvalue.
+                iss.setThreshold21(0.975);
+                // Set the upper bound on the ratio between the third and the second eigenvalue.
+                iss.setThreshold32(0.975);
+                // Set the number of prpcessing threads to use. 0 sets it to automatic.
+                iss.setNumberOfThreads(0);
+
+                iss.compute(*keypoints);
                 // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_kp (new pcl::PointCloud<pcl::PointXYZ>);
+                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(*keypoints, *cloud_kp);
                 std::cout << "Resulting ISS 3D points are of size: " << cloud_kp->points.size () <<std::endl;
-                pcl::io::savePCDFileASCII("iss_3d_kp.pcd", *cloud_kp);
+                //pcl::io::savePCDFileASCII("iss_3d_kp.pcd", *cloud_kp);
+
+                // Assign to the target FeatureCloud
+                target_cloud.setInputCloud (cloud_kp);
+                //-- copy for viewer
+                pcl::copyPointCloud(*cloud_kp, *kp_view);
+
+                break;
+            }
+        case SUSAN:
+            {
+                pcl::PointCloud<PointType>::Ptr keypoints(new pcl::PointCloud<PointType>);
+                // SUSAN keypoint detector object.
+                pcl::SUSANKeypoint<PointType, PointType> susan;
+
+                susan.setInputCloud(cloud);
+
+                susan.setRadius(susan_radius);
+                //susan.setDistanceThreshold(0.001);
+                //susan.setAngularThreshold(0.0001);
+                //susan.setIntensityThreshold(7.0);
+
+                //susan.setSearchSurface(cloud_xyz);
+                susan.setNonMaxSupression(true);
+                susan.compute(*keypoints);
+                //
+                // Copying the pointwithscale to pointxyz so as visualize the cloud
+                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
+                pcl::copyPointCloud(*keypoints, *cloud_kp);
+                std::cout << "Resulting SUSAN points are of size: " << cloud_kp->points.size () <<std::endl;
+                //pcl::io::savePCDFileASCII("susan_kp.pcd", *cloud_kp);
                 //
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
                 //-- copy for viewer
                 pcl::copyPointCloud(*cloud_kp, *kp_view);
+
+                break;
+            }
+        case UNI:
+            {
+                pcl::UniformSampling<PointType> uni;
+                uni.setRadiusSearch(uni_radius);
+                uni.setInputCloud(cloud);
+
+                pcl::PointCloud<int> keypoints_idx;
+                uni.compute(keypoints_idx);
+
+                // Copying the pointwithscale to pointxyz so as visualize the cloud
+                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
+                pcl::copyPointCloud(*cloud, keypoints_idx.points, *cloud_kp);
+                std::cout << "Resulting UniformSampling points are of size: " << cloud_kp->points.size () <<std::endl;
+
+                // Assign to the target FeatureCloud
+                target_cloud.setInputCloud (cloud_kp);
+                //-- copy for viewer
+                pcl::copyPointCloud(*cloud_kp, *kp_view);
+
+                break;
             }
     }
 
@@ -450,7 +511,7 @@ main (int argc, char **argv)
     printf ("t = < %0.3f, %0.3f, %0.3f >\n", translation (0), translation (1), translation (2));
 
     // Save the aligned template for visualization
-    pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<PointType>::Ptr transformed_cloud (new pcl::PointCloud<PointType>);
     pcl::transformPointCloud (*best_template.getPointCloud (), *transformed_cloud, best_alignment.final_transformation);
     pcl::io::savePCDFileBinary ("output.pcd", *transformed_cloud);
 
@@ -459,12 +520,13 @@ main (int argc, char **argv)
     //-- the scene
     pcl::visualization::PCLVisualizer viewer(argv[1]);
     viewer.addPointCloud(cloud, "original");
+
     //-- the keypoints (or downsampled points)
-    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> kp_colorHandler(kp_view, 255, 255, 0);
+    pcl::visualization::PointCloudColorHandlerCustom<PointType> kp_colorHandler(kp_view, 255, 255, 0);
     viewer.addPointCloud(kp_view,kp_colorHandler, "kp");
     viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "kp");
     //-- the transformed template
-    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> tr_colorHandler(transformed_cloud, 255, 0, 0);
+    pcl::visualization::PointCloudColorHandlerCustom<PointType> tr_colorHandler(transformed_cloud, 255, 0, 0);
     viewer.addPointCloud(transformed_cloud, tr_colorHandler, "transformed");
 
     while (!viewer.wasStopped()) {
