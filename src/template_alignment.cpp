@@ -298,7 +298,7 @@ main (int argc, char **argv)
     pcl::PointCloud<PointType>::Ptr cloud (new pcl::PointCloud<PointType>);
     pcl::io::loadPCDFile (argv[2], *cloud);
 
-#if 1 //-- the filter cut out part of the cloud
+#if 0 //-- the filter cut out part of the cloud
     // Preprocess the cloud by...
     // ...removing distant points
     const float depth_limit = 1.0;
