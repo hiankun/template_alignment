@@ -315,7 +315,7 @@ main (int argc, char **argv)
     if (argc < 3)
     {
         //printf ("No target PCD file given!\n");
-        std::cout << "usage: ./template_alignment ../data/object_templates.txt ../data/person.pcd [-s <sift3D min_scale> | -v <voxel_grid_size>]\n";
+        std::cout << "usage: ./template_alignment ../data/object_templates.txt ../data/person.pcd [-vox|-sift|-iss|-uni|-narf]\n";
         return (-1);
     }
 
@@ -381,7 +381,7 @@ main (int argc, char **argv)
         kp_method = NARF;
 
     FeatureCloud target_cloud;
-    pcl::PointCloud<PointType>::Ptr kp_view (new pcl::PointCloud<PointType>);
+    pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
     switch (kp_method)
     {
         case VOX:
@@ -402,8 +402,6 @@ main (int argc, char **argv)
 
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (tempCloud);
-                //-- copy for viewer
-                pcl::copyPointCloud(*tempCloud, *kp_view);
                 break;
             }
         case SIFT:
@@ -422,8 +420,6 @@ main (int argc, char **argv)
                 sift.setMinimumContrast(min_contrast);
                 sift.setInputCloud(cloud);
                 sift.compute(result);
-                // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(result, *cloud_kp);
                 // Saving the resultant cloud
                 std::cout << "Resulting Sift 3D points are of size: " << cloud_kp->points.size () <<std::endl;
@@ -431,8 +427,6 @@ main (int argc, char **argv)
                 //
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
-                //-- copy for viewer
-                pcl::copyPointCloud(*cloud_kp, *kp_view);
                 break;
             }
         case ISS:
@@ -463,16 +457,12 @@ main (int argc, char **argv)
                 iss.setNumberOfThreads(0);
 
                 iss.compute(*keypoints);
-                // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(*keypoints, *cloud_kp);
                 std::cout << "Resulting ISS 3D points are of size: " << cloud_kp->points.size () <<std::endl;
                 //pcl::io::savePCDFileASCII("iss_3d_kp.pcd", *cloud_kp);
 
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
-                //-- copy for viewer
-                pcl::copyPointCloud(*cloud_kp, *kp_view);
 
                 break;
             }
@@ -493,16 +483,12 @@ main (int argc, char **argv)
                 susan.setNonMaxSupression(true);
                 susan.compute(*keypoints);
                 //
-                // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(*keypoints, *cloud_kp);
                 std::cout << "Resulting SUSAN points are of size: " << cloud_kp->points.size () <<std::endl;
                 //pcl::io::savePCDFileASCII("susan_kp.pcd", *cloud_kp);
                 //
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
-                //-- copy for viewer
-                pcl::copyPointCloud(*cloud_kp, *kp_view);
 
                 break;
             }
@@ -515,15 +501,11 @@ main (int argc, char **argv)
                 pcl::PointCloud<int> keypoints_idx;
                 uni.compute(keypoints_idx);
 
-                // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(*cloud, keypoints_idx.points, *cloud_kp);
                 std::cout << "Resulting UniformSampling points are of size: " << cloud_kp->points.size () <<std::endl;
 
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
-                //-- copy for viewer
-                pcl::copyPointCloud(*cloud_kp, *kp_view);
 
                 break;
             }
@@ -546,16 +528,12 @@ main (int argc, char **argv)
                 pcl::PointCloud<int>::Ptr keypoints_idx(new pcl::PointCloud<int>);
                 detector.compute(*keypoints_idx);
 
-                // Copying the pointwithscale to pointxyz so as visualize the cloud
-                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
                 pcl::copyPointCloud(*cloud, keypoints_idx->points, *cloud_kp);
                 std::cout << "Resulting NARF points are of size: " << keypoints_idx->points.size () <<std::endl;
                 //pcl::io::savePCDFileASCII("narf_kp.pcd", *cloud_kp);
                 //
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
-                //-- copy for viewer
-                pcl::copyPointCloud(*cloud_kp, *kp_view);
 
                 break;
             }
@@ -601,8 +579,8 @@ main (int argc, char **argv)
     viewer.addPointCloud(cloud, "original");
 
     //-- the keypoints (or downsampled points)
-    pcl::visualization::PointCloudColorHandlerCustom<PointType> kp_colorHandler(kp_view, 255, 255, 0);
-    viewer.addPointCloud(kp_view,kp_colorHandler, "kp");
+    pcl::visualization::PointCloudColorHandlerCustom<PointType> kp_colorHandler(cloud_kp, 255, 255, 0);
+    viewer.addPointCloud(cloud_kp,kp_colorHandler, "kp");
     viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "kp");
     //-- the transformed template
     pcl::visualization::PointCloudColorHandlerCustom<PointType> tr_colorHandler(transformed_cloud, 255, 0, 0);
