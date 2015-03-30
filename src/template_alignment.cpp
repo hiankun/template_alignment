@@ -22,7 +22,13 @@
 #include <pcl/keypoints/susan.h>
 #include <pcl/keypoints/uniform_sampling.h>
 
-enum KP_METHOD {VOX, SIFT, ISS, SUSAN, UNI};
+#include <pcl/range_image/range_image_planar.h>
+#include <pcl/features/range_image_border_extractor.h>
+#include <pcl/keypoints/narf_keypoint.h>
+#include <pcl/features/narf_descriptor.h>
+#include <pcl/visualization/range_image_visualizer.h>
+
+enum KP_METHOD {VOX, SIFT, ISS, SUSAN, UNI, NARF};
 typedef pcl::PointXYZRGBA PointType;
 
 class FeatureCloud
@@ -265,6 +271,43 @@ double computeCloudResolution(const pcl::PointCloud<PointType>::ConstPtr& cloud)
     return resolution;
 }
 
+void get_range_image(pcl::PointCloud<PointType>::Ptr &cloud,
+      pcl::RangeImagePlanar& range_image) {
+    float image_size_x = 640; //cloud->width;
+    float image_size_y = 480; //cloud->height;
+
+    float center_x = image_size_x * 0.5f;
+    float center_y = image_size_y * 0.5f;
+    float focal_length_x = 200.0f; //todo
+    float focal_length_y = focal_length_x;
+
+    Eigen::Affine3f scene_sensor_pose = Eigen::Affine3f(Eigen::Translation3f(
+                cloud->sensor_origin_[0],
+                cloud->sensor_origin_[1],
+                cloud->sensor_origin_[2])) *
+        Eigen::Affine3f(cloud->sensor_orientation_);
+
+    pcl::RangeImage::CoordinateFrame coordinate_frame = pcl::RangeImage::CAMERA_FRAME;
+    float noise_level = 0.0f;
+    float min_range = 0.0f;
+
+    //pcl::RangeImagePlanar range_image;
+    range_image.createFromPointCloudWithFixedSize(
+            *cloud, image_size_x, image_size_y,
+            center_x, center_y, focal_length_x, focal_length_y,
+            scene_sensor_pose, coordinate_frame,
+            noise_level, min_range);
+#if 0
+    //-- visualization
+    pcl::visualization::RangeImageVisualizer viewer("planar range image");
+    viewer.showRangeImage(range_image);
+    while (!viewer.wasStopped()) {
+        viewer.spinOnce();
+        pcl_sleep(0.1);
+    }
+#endif
+}
+
 // Align a collection of object templates to a sample point cloud
     int
 main (int argc, char **argv)
@@ -332,6 +375,10 @@ main (int argc, char **argv)
     float uni_radius (0.01f);
     if (pcl::console::parse(argc, argv, "-uni", uni_radius) > 0)
         kp_method = UNI;
+
+    float support_size = 0.2f; //todo
+    if (pcl::console::parse(argc, argv, "-narf", support_size) > 0)
+        kp_method = NARF;
 
     FeatureCloud target_cloud;
     pcl::PointCloud<PointType>::Ptr kp_view (new pcl::PointCloud<PointType>);
@@ -473,6 +520,38 @@ main (int argc, char **argv)
                 pcl::copyPointCloud(*cloud, keypoints_idx.points, *cloud_kp);
                 std::cout << "Resulting UniformSampling points are of size: " << cloud_kp->points.size () <<std::endl;
 
+                // Assign to the target FeatureCloud
+                target_cloud.setInputCloud (cloud_kp);
+                //-- copy for viewer
+                pcl::copyPointCloud(*cloud_kp, *kp_view);
+
+                break;
+            }
+        case NARF:
+            {
+                //-- get range image
+                pcl::RangeImagePlanar range_image;
+                get_range_image(cloud, range_image);
+
+                //-- find borders
+                pcl::RangeImageBorderExtractor border_extractor(&range_image);
+                pcl::PointCloud<pcl::BorderDescription>::Ptr borders(\
+                        new pcl::PointCloud<pcl::BorderDescription>);
+                border_extractor.compute(*borders);
+
+                //-- get keypoints
+                pcl::NarfKeypoint detector(&border_extractor);
+                detector.setRangeImage(&range_image);
+                detector.getParameters().support_size = support_size;//todo
+                pcl::PointCloud<int>::Ptr keypoints_idx(new pcl::PointCloud<int>);
+                detector.compute(*keypoints_idx);
+
+                // Copying the pointwithscale to pointxyz so as visualize the cloud
+                pcl::PointCloud<PointType>::Ptr cloud_kp (new pcl::PointCloud<PointType>);
+                pcl::copyPointCloud(*cloud, keypoints_idx->points, *cloud_kp);
+                std::cout << "Resulting NARF points are of size: " << keypoints_idx->points.size () <<std::endl;
+                //pcl::io::savePCDFileASCII("narf_kp.pcd", *cloud_kp);
+                //
                 // Assign to the target FeatureCloud
                 target_cloud.setInputCloud (cloud_kp);
                 //-- copy for viewer
